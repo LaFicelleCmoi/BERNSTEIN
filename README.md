@@ -1,28 +1,61 @@
-# B-DOP-200 — Mémo de lancement du projet
+# 🐳 B-DOP-200 — Popeye · Mémo de lancement
 
-## Prérequis (une seule fois, déjà normalement fait)
-
-- Docker installé dans WSL
-- `kubectl` installé
-- `k3d` installé
-- Cluster `dop-cluster` créé (sinon voir [Créer le cluster](#créer-le-cluster-de-zéro-si-supprimé--1ère-install))
+> Stack Kubernetes locale via **K3d** · PostgreSQL · Redis · Poll / Worker / Result · Traefik
 
 ---
 
-## 1. Démarrage quotidien (après reboot du PC)
+## 📋 Table des matières
+
+1. [Prérequis](#-prérequis)
+2. [Démarrage quotidien](#-démarrage-quotidien)
+3. [Créer le cluster de zéro](#-créer-le-cluster-de-zéro)
+4. [Déployer les manifestes](#-déployer-les-manifestes)
+5. [Initialiser la base PostgreSQL](#-initialiser-la-base-postgresql)
+6. [Configurer `/etc/hosts`](#-configurer-etchosts)
+7. [URLs de test](#-urls-de-test)
+8. [Commandes de débogage](#-commandes-de-débogage)
+9. [Nettoyage & Arrêt](#-nettoyage--arrêt)
+10. [Notes & Problèmes connus](#-notes--problèmes-connus)
+
+---
+
+## ✅ Prérequis
+
+> Ces étapes sont à faire **une seule fois**. Si le cluster existe déjà, passe directement au [Démarrage quotidien](#-démarrage-quotidien).
+
+| Outil | Statut attendu |
+|-------|---------------|
+| Docker (dans WSL) | `sudo service docker status` → running |
+| `kubectl` | `kubectl version --client` |
+| `k3d` | `k3d version` |
+| Cluster `dop-cluster` | `k3d cluster list` → dop-cluster |
+
+Si le cluster n'existe pas encore → [Créer le cluster de zéro](#-créer-le-cluster-de-zéro)
+
+---
+
+## 🚀 Démarrage quotidien
+
+> À faire à **chaque redémarrage du PC**. Les pods reprennent là où ils s'étaient arrêtés.
 
 ```bash
-# Lancer Docker
+# 1. Lancer Docker
 sudo service docker start
 
-# Lancer le cluster K3d (les pods reprennent où ils s'étaient arrêtés)
+# 2. Relancer le cluster K3d
 k3d cluster start dop-cluster
 
-# Vérifier que tout est UP (attendre ~30s avant de check)
+# 3. Vérifier que tout est UP (attendre ~30s)
 kubectl get pods -A
 ```
-## 2. Créer le cluster de zéro (si supprimé / 1ère install)
-```
+
+---
+
+## 🏗️ Créer le cluster de zéro
+
+> À faire uniquement si le cluster a été **supprimé** ou lors de la **première installation**.
+
+```bash
 k3d cluster create dop-cluster \
   --servers 1 \
   --agents 2 \
@@ -31,26 +64,43 @@ k3d cluster create dop-cluster \
   --k3s-arg "--disable=traefik@server:*"
 ```
 
-## 3. Déployer les manifests (dans l'ordre)
-```
+---
+
+## 📦 Déployer les manifestes
+
+> Depuis le répertoire `~/B-DOP-200_popeye_applications`, **dans l'ordre ci-dessous**.
+
+```bash
 cd ~/B-DOP-200_popeye_applications
+```
 
-# cAdvisor (monitoring)
+### 1 — cAdvisor (monitoring)
+
+```bash
 kubectl apply -f cadvisor.daemonset.yaml
+```
 
-# PostgreSQL
+### 2 — PostgreSQL
+
+```bash
 kubectl apply -f postgres.secret.yaml \
               -f postgres.configmap.yaml \
               -f postgres.volume.yaml \
               -f postgres.deployment.yaml \
               -f postgres.service.yaml
+```
 
-# Redis
+### 3 — Redis
+
+```bash
 kubectl apply -f redis.configmap.yaml \
               -f redis.deployment.yaml \
               -f redis.service.yaml
+```
 
-# Apps (poll, worker, result) + Ingress
+### 4 — Applications (poll · worker · result) + Ingress
+
+```bash
 kubectl apply -f poll.deployment.yaml \
               -f worker.deployment.yaml \
               -f result.deployment.yaml \
@@ -58,57 +108,85 @@ kubectl apply -f poll.deployment.yaml \
               -f result.service.yaml \
               -f poll.ingress.yaml \
               -f result.ingress.yaml
+```
 
-# Traefik (RBAC en premier !)
+### 5 — Traefik (RBAC **en premier** !)
+
+```bash
 kubectl apply -f traefik.rbac.yaml \
               -f traefik.deployment.yaml \
               -f traefik.service.yaml
 ```
-## 4. Créer la table votes dans PostgreSQL (à faire 1 fois)
-```
+
+---
+
+## 🗄️ Initialiser la base PostgreSQL
+
+> À faire **une seule fois** après le premier déploiement.
+
+```bash
 POD=$(kubectl get pod -l app=postgres -o jsonpath='{.items[0].metadata.name}')
 echo "CREATE TABLE votes (id text PRIMARY KEY, vote text NOT NULL);" | \
   kubectl exec -i $POD -c postgres -- psql -U postgres
 ```
-## 5. Configurer /etc/hosts (à faire 1 fois)
-### Côté WSL
-```
+
+---
+
+## 🌐 Configurer `/etc/hosts`
+
+> À faire **une seule fois** sur WSL et sur Windows.
+
+**WSL**
+```bash
 echo "127.0.0.1 poll.dop.io result.dop.io" | sudo tee -a /etc/hosts
 ```
-### Côté Windows (PowerShell admin)
+
+**Windows — PowerShell (administrateur)**
+```powershell
+Add-Content -Path C:\Windows\System32\drivers\etc\hosts `
+            -Value "127.0.0.1 poll.dop.io result.dop.io"
 ```
-Add-Content -Path C:\Windows\System32\drivers\etc\hosts -Value "127.0.0.1 poll.dop.io result.dop.io"
-```
 
-## 6. URLs de test
-Application	URL
-Poll	http://poll.dop.io:30021
+---
 
-Result	http://result.dop.io:30021
+## 🔗 URLs de test
 
-Dashboard Traefik	http://localhost:30042
+| Service | URL |
+|---------|-----|
+| 🗳️ Application Poll | http://poll.dop.io:30021 |
+| 📊 Résultats | http://result.dop.io:30021 |
+| 🛡️ Dashboard Traefik | http://localhost:30042 |
 
-## 7. Commandes utiles de debug
-```
+---
+
+## 🛠️ Commandes de débogage
+
+```bash
 # État de tous les pods
 kubectl get pods -A
 
-# Détail d'un pod
+# Détail d'un pod spécifique
 kubectl describe pod <nom-du-pod>
 
-# Logs en live
-kubectl logs -f -l app=<poll|result|worker|postgres|redis|traefik>
+# Logs en live (remplacer <app> par poll, result, worker, postgres, redis ou traefik)
+kubectl logs -f -l app=<app>
 
 # Redémarrer un deployment
 kubectl rollout restart deployment/<nom>
 
-# Voir les ingress
+# Voir les ingress configurés
 kubectl get ingress
+
+# Vérifier l'IngressClass Traefik
+kubectl get ingressclass
 ```
 
-## 8. Nettoyage / Arrêt 
-```
-# Stopper le cluster (sans le supprimer)
+---
+
+## 🧹 Nettoyage & Arrêt
+
+```bash
+# Stopper le cluster (sans le supprimer — les données sont conservées)
 k3d cluster stop dop-cluster
 
 # Supprimer complètement le cluster
@@ -117,26 +195,36 @@ k3d cluster delete dop-cluster
 # Supprimer tous les manifests sans toucher au cluster
 kubectl delete -f .
 ```
-## 9. Notes importantes
 
-Si l'IP WSL change après reboot (vérifier avec hostname -I), refaire les netsh portproxy côté Windows pour l'accès depuis le téléphone.
+---
 
-cAdvisor reste en RunContainerError sur K3d (limitation du runtime). Le manifest est correct, c'est juste l'environnement qui pose souci.
+## ⚠️ Notes & Problèmes connus
 
-En cas de problème "Page 404 introuvable" sur result :
-Vérifier les logs de result (problème probable de connexion PostgreSQL).
-Le ConfigMap postgres-config doit contenir POSTGRES_HOST, POSTGRES_PORT, POSTGRES_DB.
+### IP WSL changeante après reboot
+Si l'IP WSL change (vérifier avec `hostname -I`), refaire les règles `netsh portproxy` côté Windows pour l'accès depuis d'autres appareils.
 
-En cas de problème "404 page not found" sur poll/result via Traefik :
-Vérifier que l'IngressClass traefik existe :
+### cAdvisor en `RunContainerError`
+Comportement attendu sur K3d — limitation du runtime conteneur. Le manifeste est correct, c'est l'environnement qui pose souci. Pas bloquant.
+
+### "Page 404" sur `result`
+Problème probable de connexion PostgreSQL. Vérifier que le ConfigMap `postgres-config` contient bien :
+- `POSTGRES_HOST`
+- `POSTGRES_PORT`
+- `POSTGRES_DB`
+
+```bash
+kubectl logs -f -l app=result
 ```
+
+### "404 page not found" via Traefik sur poll/result
+L'IngressClass `traefik` est peut-être absente. Vérifier :
+
+```bash
 kubectl get ingressclass
 ```
-Si l’IngressClass traefik est absente (vérifiable avec kubectl get ingressclass),
-il suffit de réappliquer le fichier traefik.rbac.yaml pour la recréer.
-```
+
+Si absente, la recréer :
+
+```bash
 kubectl apply -f traefik.rbac.yaml
-
 ```
-
-  
